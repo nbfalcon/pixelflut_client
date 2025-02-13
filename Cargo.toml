@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "pixelflut_base",
+    "pixelflut_gstreamer",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.84"
+version = "0.1.0"
+
+[workspace.dependencies]
+arrayvec = "0.7.6"
+gstreamer = "0.23.4"
+gstreamer-video = "0.23.4"

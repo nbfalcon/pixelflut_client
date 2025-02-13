@@ -1,0 +1,21 @@
+[package]
+name = "pixelflut_gstreamer"
+description = "Pixelflut Sink for GStreamer"
+repository = "https://github.com/nbfalcon/pixelflut_client"
+license = "MIT"
+authors = ["Nikita Bloshchanevich <nikblos@outlook.com>"]
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "gstpixelflut"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+arrayvec.workspace = true
+gstreamer.workspace = true
+gstreamer-video.workspace = true
+
+[build-dependencies]
+gst-plugin-version-helper = "0.8.2"
