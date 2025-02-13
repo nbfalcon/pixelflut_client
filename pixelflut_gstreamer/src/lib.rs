@@ -1,3 +1,4 @@
+#![feature(portable_simd)]
 pub mod blit_image;
 pub mod pixelflut_builder;
 pub mod pixelflut_gstreamer;

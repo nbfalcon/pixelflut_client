@@ -120,7 +120,7 @@ mod imp {
         fn metadata() -> Option<&'static gstreamer::subclass::ElementMetadata> {
             static ELEMENT_DATA: LazyLock<ElementMetadata> = LazyLock::new(|| {
                 ElementMetadata::new(
-                    "Image2Pixelflut Convert",
+                    "Image2Pixelflut Converter",
                     "Filter",
                     "Converts images to Pixelflut TCP",
                     "Nikita Bloshchanevich <nikblos@outlook.com>",
