@@ -30,7 +30,7 @@ fn hex4_2le(number: u32) -> [u8; 8] {
     // ascii.resize(0xFF).to_array()
 
     let le_10 = number_full.simd_lt(u8x8::splat(10));
-    let to_ascii = le_10.select(u8x8::splat(b'0'), u8x8::splat(b'A' - 10));
+    let to_ascii = le_10.select(u8x8::splat(b'0'), u8x8::splat(b'a' - 10));
     (number_full + to_ascii).to_array()
 }
 
@@ -72,6 +72,17 @@ impl<'a> PixelflutBuilder<'a> {
         self.add_slice(b"\r\n");
     }
 
+    pub fn cmd_pxb(&mut self, x: Coord, y: Coord, color: Color) {
+        debug_assert!(self.check_capacity(1));
+
+        self.add_slice(b"PB");
+        self.add_slice(&x.to_le_bytes());
+        self.add_slice(&y.to_le_bytes());
+        self.add_slice(&[
+            color.r, color.g, color.b, color.a,
+        ]);
+    }
+
     pub fn with_capacity(data_slice: &'a mut [u8], max_px_count: usize) -> Self {
         // TODO: Make this return Option, we can then return NOT-NEGOTIATED instead of asserting out
         assert!(data_slice.len() >= max_px_count * PX_MAX_LENGTH);
@@ -97,6 +108,7 @@ impl<'a> PixelflutBuilder<'a> {
         &self.data_slice[..self.head_ptr]
     }
 
+    // FIXME: unsound
     #[inline(always)]
     fn add_slice(&mut self, append_me: &[u8]) {
         unsafe {
