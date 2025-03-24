@@ -7,13 +7,16 @@ use gstreamer_video::gst_base;
 mod imp {
     use crate::{
         blit_image::{blit_image, ImageInfo},
-        pixelflut_builder::PixelflutBuilder,
+        pixelflut_builder::{Coord, PixelflutBuilder},
     };
     use gstreamer::{
         glib::{
             self,
             subclass::{object::ObjectImpl, types::ObjectSubclass},
+            value::ToValue,
+            ParamSpecBuilderExt,
         },
+        prelude::GstParamSpecBuilderExt,
         subclass::{
             prelude::{ElementImpl, GstObjectImpl},
             ElementMetadata,
@@ -27,12 +30,18 @@ mod imp {
         },
         VideoFormat,
     };
-    use std::sync::{LazyLock, Mutex};
+    use std::sync::{
+        atomic::{AtomicU16, Ordering},
+        LazyLock, Mutex,
+    };
 
     #[derive(Default)]
     pub struct PixelflutConvert {
         // FIXME: ImageInfo is POD, we can use non-Mutex
         image: Mutex<ImageInfo>,
+
+        offset_x: AtomicU16,
+        offset_y: AtomicU16,
     }
 
     #[glib::object_subclass]
@@ -43,7 +52,55 @@ mod imp {
         type ParentType = gst_base::BaseTransform;
     }
 
-    impl ObjectImpl for PixelflutConvert {}
+    impl ObjectImpl for PixelflutConvert {
+        fn properties() -> &'static [glib::ParamSpec] {
+            static PROPERTIES: LazyLock<[glib::ParamSpec; 2]> = LazyLock::new(|| {
+                [
+                    glib::ParamSpecUInt::builder("offset-x")
+                        .nick("X")
+                        .blurb("X of top-left corner for pixels")
+                        .default_value(0)
+                        .minimum(0)
+                        .maximum(Coord::MAX as u32)
+                        .mutable_playing()
+                        .build(),
+                    glib::ParamSpecUInt::builder("offset-y")
+                        .nick("Y")
+                        .blurb("Y of top-left corner for pixels")
+                        .default_value(0)
+                        .minimum(0)
+                        .maximum(Coord::MAX as u32)
+                        .mutable_playing()
+                        .build(),
+                ]
+            });
+            PROPERTIES.as_ref()
+        }
+
+        fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+            match pspec.name() {
+                "offset-x" => (self.offset_x.load(Ordering::Relaxed) as u32).to_value(),
+                "offset-y" => (self.offset_y.load(Ordering::Relaxed) as u32).to_value(),
+                _ => unimplemented!(),
+            }
+        }
+
+        fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
+            match pspec.name() {
+                name @ ("offset-x" | "offset-y") => {
+                    let v = value.get::<u32>().unwrap().try_into().unwrap();
+                    let d = if name == "offset-x" {
+                        &self.offset_x
+                    } else {
+                        &self.offset_y
+                    };
+                    d.store(v, Ordering::Relaxed);
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
     impl GstObjectImpl for PixelflutConvert {}
 
     impl BaseTransformImpl for PixelflutConvert {
@@ -67,7 +124,13 @@ mod imp {
                     image_info.width,
                     image_info.height,
                 );
-                blit_image(&mut writer, &mapped_in, &image_info);
+                blit_image(
+                    &mut writer,
+                    &mapped_in,
+                    &image_info,
+                    self.offset_x.load(Ordering::Relaxed),
+                    self.offset_y.load(Ordering::Relaxed),
+                );
                 writer.as_slice().len()
             };
             outbuf.set_size(len);

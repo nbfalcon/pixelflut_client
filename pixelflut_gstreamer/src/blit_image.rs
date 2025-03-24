@@ -15,7 +15,7 @@ pub struct ImageInfo {
     pub stride_extra: u32,
 }
 
-pub fn blit_image(out: &mut PixelflutBuilder, image_data: &[u8], image_info: &ImageInfo) {
+pub fn blit_image(out: &mut PixelflutBuilder, image_data: &[u8], image_info: &ImageInfo, offset_x: Coord, offset_y: Coord) {
     assert!(out.check_capacity((image_info.height as usize) * (image_info.width as usize)));
     // println!("{}/{}", image_data.len(), image_info.stride_extra);
     assert!(
@@ -35,7 +35,7 @@ pub fn blit_image(out: &mut PixelflutBuilder, image_data: &[u8], image_info: &Im
                 ptr::read_unaligned(ptr)
             };
             let px: Color = unsafe { std::mem::transmute(px_data) };
-            out.cmd_pxb(x, y, px);
+            out.cmd_pxb(x.wrapping_add(offset_x), y.wrapping_add(offset_y), px);
         }
     }
 }
