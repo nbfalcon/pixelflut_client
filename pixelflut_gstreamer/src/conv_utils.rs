@@ -171,7 +171,9 @@ pub(crate) fn itoa_coord_simd2_sse(a: u16, b: u16, out: *mut u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use crate::conv_utils::{hex4_2le, itoa_coord, itoa_coord_simd, itoa_coord_simd2_sse, itoa_coord_simd_l};
+    use crate::conv_utils::{
+        hex4_2le, itoa_coord, itoa_coord_simd, itoa_coord_simd2_sse, itoa_coord_simd_l,
+    };
     use test::Bencher;
 
     #[test]
@@ -202,12 +204,27 @@ mod tests {
             let mut out = [0u8; 32];
             for _ in 0..(1920 * 1080) {
                 let mut i = 0;
-                i += itoa_coord_simd_l(test::black_box(65300), (&mut out[0..8]).try_into().unwrap());
-                out[i as usize] = b' ';
-                i += itoa_coord_simd_l(test::black_box(65321), (&mut out[8..16]).try_into().unwrap());
-                out[i as usize..i as usize + 8].copy_from_slice(&hex4_2le(0xFFFFAABB));
-                i += 8;
-                out[i as usize..i as usize + 2].copy_from_slice(b"\r\n");
+                unsafe {
+                    i += itoa_coord_simd_l(
+                        test::black_box(65300),
+                        (&mut out[i as usize..i as usize + 8]).try_into().unwrap(),
+                    );
+                    *out.get_unchecked_mut(i as usize) = b' ';
+                    i += itoa_coord_simd_l(
+                        test::black_box(65321),
+                        (&mut out[i as usize..i as usize + 8])
+                            .try_into()
+                            .unwrap_unchecked(),
+                    );
+                    let out_hex: &mut [u8; 8] = out.get_unchecked_mut(i as usize..i as usize + 8).try_into().unwrap_unchecked();
+                    i += 8;
+                    *out_hex = hex4_2le(0xFFFFAABB);
+
+                    let out_nl: &mut [u8; 2] = &mut out[i as usize..i as usize + 2].try_into().unwrap_unchecked();
+                    *out_nl = *b"\r\n";
+                    i += 2;
+                }
+                test::black_box(i);
                 test::black_box(out);
             }
         });
