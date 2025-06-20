@@ -1,8 +1,5 @@
 use std::ptr;
-
-use gstreamer::glib::subclass::interface;
-
-use crate::encoding_helpers::{hex4_2le, itoa_coord, write_px_rgb};
+use crate::encoding_helpers::write_px_rgba;
 
 #[repr(C)]
 // RGBA_LE32
@@ -20,13 +17,13 @@ pub struct PixelflutBuilder<'a> {
     head_ptr: usize,
 }
 
-const PX_MAX_LENGTH: usize = b"PX 65336 65336 RRGGBB\r\n".len();
+const PX_MAX_LENGTH: usize = b"PX 65336 65336 RRGGBBAA\r\n".len();
 
 impl<'a> PixelflutBuilder<'a> {
     #[inline(always)]
     pub fn cmd_px(&mut self, x: Coord, y: Coord, color: Color) {
         let len = unsafe {
-            write_px_rgb(
+            write_px_rgba(
                 self.slice_head(),
                 x,
                 y,

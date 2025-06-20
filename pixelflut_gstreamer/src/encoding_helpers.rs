@@ -69,36 +69,38 @@ pub(crate) fn itoa_coord_simd(n: u16) -> ([u8; 8], u8) {
 }
 
 /// Generates a PX command (ascii) for an RGB pixel.
-/// Note that if RGBA is given, the result might be corrupted.
 /// Returns: the resulting length
 #[inline(always)]
-pub(crate) unsafe fn write_px_rgb(out: *mut u8, x: u16, y: u16, pixel: u32) -> u8 {
+pub(crate) unsafe fn write_px_rgba(out: *mut u8, x: u16, y: u16, pixel: u32) -> u8 {
     let (x, x_len) = itoa_coord_simd(x);
     let (y, y_len) = itoa_coord_simd(y);
     let x = u64::from_le_bytes(x);
     let y = u64::from_le_bytes(y);
-    let hex = u64::from_le_bytes(hex4_2le(pixel));
+    let hex = u64::from_le_bytes(hex4_2le(pixel | 0xFF000000u32));
 
     // Add formattig
     let x_px = (x << 24) | (u32::from_le_bytes(*b"PX \0") as u64);
     let y_spc = (y << 8) | (b' ' as u64) | (b' ' as u64) << ((y_len + 1) * 8);
-    let hex_rn = hex & (!0u64 >> 16) | u64::from_le_bytes(*b"\0\0\0\0\0\0\r\n");
 
     unsafe {
         ptr::write_unaligned(out.byte_offset(0) as *mut _, x_px);
         ptr::write_unaligned(out.byte_offset((x_len + 3) as isize) as *mut _, y_spc);
         ptr::write_unaligned(
             out.byte_offset((x_len + 3 + y_len + 2) as isize) as *mut _,
-            hex_rn,
+            hex,
+        );
+        ptr::write_unaligned(
+            out.byte_offset((x_len + 3 + y_len + 2 + 8) as isize) as *mut _,
+            *b"\n",
         );
     }
-    let total = 3 + x_len + 1 + y_len + 1 + 6 + 2 as u8;
+    let total = 3 + x_len + 1 + y_len + 1 + 8 + 1 as u8;
     total
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::encoding_helpers::{hex4_2le, itoa_coord_simd, write_px_rgb};
+    use crate::encoding_helpers::{hex4_2le, itoa_coord_simd, write_px_rgba};
     use test::Bencher;
 
     #[test]
@@ -118,22 +120,22 @@ mod tests {
     fn test_encode_px_command() {
         let mut out = [0u8; 128];
         // Note: we have little-endian
-        let l = unsafe { write_px_rgb((&mut out).as_mut_ptr(), 230, 5000, 0xbbaaff) };
+        let l = unsafe { write_px_rgba((&mut out).as_mut_ptr(), 230, 5000, 0xbbaaff) };
         assert_eq!(
             String::from_utf8_lossy(&out[..l as usize]),
-            "PX 230 5000 ffaabb\r\n"
+            "PX 230 5000 ffaabbff\r\n"
         );
 
-        let l = unsafe { write_px_rgb((&mut out).as_mut_ptr(), 0, 1, 0xbbaaff) };
+        let l = unsafe { write_px_rgba((&mut out).as_mut_ptr(), 0, 1, 0xbbaaff) };
         assert_eq!(
             String::from_utf8_lossy(&out[..l as usize]),
-            "PX 0 1 ffaabb\r\n"
+            "PX 0 1 ffaabbff\r\n"
         );
 
         for x in 0..1920 {
             for y in 0..1080 {
                 // println!("x = {x}, y = {y}");
-                unsafe { write_px_rgb((&mut out).as_mut_ptr(), x, y, 0xbbaaff) };
+                unsafe { write_px_rgba((&mut out).as_mut_ptr(), x, y, 0xbbaaff) };
             }
         }
     }
@@ -144,7 +146,7 @@ mod tests {
             for _ in 0..(1920 * 1080) {
                 let mut out = [0u8; 32];
                 let len = unsafe {
-                    write_px_rgb(
+                    write_px_rgba(
                         (&mut out).as_mut_ptr(),
                         std::hint::black_box(6400),
                         std::hint::black_box(200),
