@@ -5,6 +5,7 @@ extern crate test;
 pub mod blit_image;
 pub mod pixelflut_builder;
 pub mod pixelflut_gstreamer;
+mod conv_utils;
 
 use pixelflut_gstreamer::plugin_init;
 
