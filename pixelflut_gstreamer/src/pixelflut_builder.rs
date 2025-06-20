@@ -1,6 +1,8 @@
 use std::ptr;
 
-use crate::conv_utils::{hex4_2le, itoa_coord};
+use gstreamer::glib::subclass::interface;
+
+use crate::encoding_helpers::{hex4_2le, itoa_coord, write_px_rgb};
 
 #[repr(C)]
 // RGBA_LE32
@@ -18,23 +20,20 @@ pub struct PixelflutBuilder<'a> {
     head_ptr: usize,
 }
 
-const PX_MAX_LENGTH: usize = b"PX 65336 65336 RRGGBBAA\r\n".len();
+const PX_MAX_LENGTH: usize = b"PX 65336 65336 RRGGBB\r\n".len();
 
 impl<'a> PixelflutBuilder<'a> {
     #[inline(always)]
     pub fn cmd_px(&mut self, x: Coord, y: Coord, color: Color) {
-        // FIXME: unsound
-        debug_assert!(self.check_capacity(1));
-
-        self.add_slice(b"PX ");
-        self.add_slice(&itoa_coord(x));
-        self.add_slice(b" ");
-        self.add_slice(&itoa_coord(y));
-        self.add_slice(b" ");
-        self.add_slice(&hex4_2le(u32::from_le_bytes([
-            color.r, color.g, color.b, color.a,
-        ])));
-        self.add_slice(b"\r\n");
+        let len = unsafe {
+            write_px_rgb(
+                self.slice_head(),
+                x,
+                y,
+                u32::from_le_bytes([color.r, color.g, color.b, color.a]),
+            )
+        };
+        self.add_length(len.into());
     }
 
     #[inline(always)]
@@ -61,7 +60,7 @@ impl<'a> PixelflutBuilder<'a> {
     }
 
     pub fn required_size(x: Coord, y: Coord) -> usize {
-        (x as usize) * (y as usize) * PX_MAX_LENGTH
+        (x as usize) * (y as usize) * PX_MAX_LENGTH + PX_MAX_LENGTH
     }
 
     pub fn check_capacity(&self, n_pixels: usize) -> bool {
@@ -81,5 +80,15 @@ impl<'a> PixelflutBuilder<'a> {
             self.head_ptr += append_me.len();
         }
     }
-}
 
+    #[inline(always)]
+    unsafe fn slice_head(&mut self) -> *mut u8 {
+        self.data_slice
+            .as_mut_ptr()
+            .byte_offset(self.head_ptr as isize)
+    }
+
+    fn add_length(&mut self, length: usize) {
+        self.head_ptr += length;
+    }
+}

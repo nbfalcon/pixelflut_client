@@ -35,7 +35,7 @@ pub fn blit_image(out: &mut PixelflutBuilder, image_data: &[u8], image_info: &Im
                 ptr::read_unaligned(ptr)
             };
             let px: Color = unsafe { std::mem::transmute(px_data) };
-            out.cmd_pxb(x.wrapping_add(offset_x), y.wrapping_add(offset_y), px);
+            out.cmd_px(x.wrapping_add(offset_x), y.wrapping_add(offset_y), px);
         }
     }
 }
