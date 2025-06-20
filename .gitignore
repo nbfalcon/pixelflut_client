@@ -1,3 +1,7 @@
 /target
 rustc-ice-*
 perf.dat*
+.vscode
+*.mkv
+*.webm
+*.mp4
