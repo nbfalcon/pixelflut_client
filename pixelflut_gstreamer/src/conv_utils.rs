@@ -138,34 +138,23 @@ pub(crate) fn itoa_coord_simd2_sse(a: u16, b: u16, out: *mut u8) -> u8 {
     let mask_b = (nz_mask & 0xFF) as u8;
     let a_lz = mask_a.leading_zeros() as u8;
     let b_lz = mask_b.leading_zeros() as u8;
+    let a_len = 8 - a_lz;
+    let b_len = 8 - b_lz;
 
-    let strip_junk_mask = ((0xFFu8 << a_lz) as u16) << 0 | ((0xFFu8 << b_lz) as u16) << 8;
     let as_digits_ascii = as_digits + u8x16::splat(b'0');
-    let as_digits_clean =
-        mask8x16::from_bitmask(strip_junk_mask.into()).select(as_digits_ascii, u8x16::splat(0));
 
+    let ascii_2: u64x2 = unsafe { mem::transmute(as_digits_ascii) };
+    let [num_a, num_b] = ascii_2.to_array();
+    // Align them to the right
+    let a_l = num_a >> (a_lz * 8);
+    let b_l = num_b >> (b_lz * 8);
     unsafe {
-        let ascii_2: u64x2 = mem::transmute(as_digits_clean);
-        let [num_a, num_b] = ascii_2.to_array();
-
-        // whitespace: insert it in num_a
-        let num_a = num_a >> 8 | (b' ' as u64) << 56;
-        let a_lz = a_lz - 1;
-
-        // let a_ledge = num_a >> (a_lz * 8);
-        // let b_ledge = num_b >> (b_lz * 8);
-        // let write_2 = b_ledge >> (a_lz * 8);
-        // let b_fora = b_ledge >> ((8 - a_lz) * 8);
-        // let write_1 = a_ledge | b_fora;
-        // ptr::write_unaligned(out as *mut _, [write_1, write_2]);
-
-        let combined = (num_a as u128) | ((num_b >> (b_lz * 8)) as u128) << 64;
-        let combined = combined >> (a_lz * 8);
-        ptr::write_unaligned(out as *mut _, combined);
+        ptr::write_unaligned(out as *mut _, a_l);
+        ptr::write(out.byte_offset(a_len as isize), b' ');
+        ptr::write_unaligned(out.byte_offset(a_len as isize + 1) as *mut _, b_l);
     }
 
-    let length = strip_junk_mask.count_ones() as u8;
-    let length = length + 1; // whitespace: +1
+    let length = a_len + 1 + b_len; // + 1 for whitespace
     length
 }
 
@@ -216,11 +205,16 @@ mod tests {
                             .try_into()
                             .unwrap_unchecked(),
                     );
-                    let out_hex: &mut [u8; 8] = out.get_unchecked_mut(i as usize..i as usize + 8).try_into().unwrap_unchecked();
+                    let out_hex: &mut [u8; 8] = out
+                        .get_unchecked_mut(i as usize..i as usize + 8)
+                        .try_into()
+                        .unwrap_unchecked();
                     i += 8;
                     *out_hex = hex4_2le(0xFFFFAABB);
 
-                    let out_nl: &mut [u8; 2] = &mut out[i as usize..i as usize + 2].try_into().unwrap_unchecked();
+                    let out_nl: &mut [u8; 2] = &mut out[i as usize..i as usize + 2]
+                        .try_into()
+                        .unwrap_unchecked();
                     *out_nl = *b"\r\n";
                     i += 2;
                 }
