@@ -1,5 +1,16 @@
+use core::mem;
 use core::simd::{simd_swizzle, u8x4, u8x8};
-use std::{ptr, simd::cmp::SimdPartialOrd};
+use std::arch::x86_64::_mm_storeu_si128;
+use std::simd::{mask8x16, u64x2, u8x1, u8x2, Mask};
+use std::{
+    arch::x86_64,
+    ptr,
+    simd::{
+        cmp::{SimdPartialEq, SimdPartialOrd},
+        num::SimdUint,
+        u16x16, u16x8, u8x16,
+    },
+};
 
 #[repr(C)]
 // RGBA_LE32
@@ -50,13 +61,125 @@ fn itoa_coord(mut c: u16) -> [u8; 5] {
     result
 }
 
+#[inline(always)]
+fn itoa_coord_simd(c: u16, out: &mut [u8; 5]) -> u8 {
+    if c == 0 {
+        out[0] = b'0';
+        1
+    } else {
+        let div10 = u16x8::from_array([1, 1, 1, 10000, 1000, 100, 10, 1]);
+        let cx8 = u16x8::splat(c);
+
+        let as_digits_pre = cx8 / div10;
+        let as_digits: u8x8 = (as_digits_pre % u16x8::splat(10)).cast();
+        let leading_zeroes_mask: u8 =
+            (as_digits.simd_ne(u8x8::splat(0)).to_bitmask() & 0b11111) as u8; // Mask out the leading [1,1,1]
+
+        let start = leading_zeroes_mask.leading_zeros() as u8;
+        let length = 8 - start;
+        let inslice = &(as_digits + u8x8::splat(b'0')).to_array()[start as usize..];
+        let outslice = &mut out[..length as usize];
+        outslice.copy_from_slice(inslice);
+
+        length
+    }
+}
+
+#[inline(always)]
+fn itoa_coord_simd2_avx512(a: u16, b: u16, out: *mut u8) -> u8 {
+    // FIXME: unfinished
+    const DIV10: u16x16 = u16x16::from_array([
+        1, 1, 1, 10000, 1000, 100, 10, 1, 1, 1, 1, 10000, 1000, 100, 10, 1,
+    ]);
+
+    // Both numbers concat'd
+    let cx8 = simd_swizzle!(
+        u16x8::splat(a),
+        u16x8::splat(b),
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    );
+    let as_digits_pre = cx8 / DIV10;
+    // Both numbers concat'd (ignoring the leaidng ones in DIV10) converted to digits (non-ascii)
+    let as_digits: u8x16 = (as_digits_pre % u16x16::splat(10)).cast();
+    // This is the actual digits we have. We mask of the [1,1,1] parts because they cannot count.
+    let nz_mask =
+        (as_digits_pre.simd_ne(u16x16::splat(0))).to_bitmask() as u16 & 0b0001111100011111u16;
+    // FIXME: we assume we are non-zero (mask would have to be ored so tha there is a 1 in the lsb of a and b always, which would not be for zero)
+    let as_digits_ascii = as_digits + u8x16::splat(b'0');
+
+    // FIXME: we can make this even faster by encoding the "PX" prefix in this function as well.
+    unsafe {
+        let compressed = x86_64::_mm_maskz_compress_epi8(nz_mask, mem::transmute(as_digits_ascii));
+        _mm_storeu_si128(out as *mut _, compressed);
+    }
+
+    let length = nz_mask.count_ones() as u8;
+    length
+}
+
+#[inline(always)]
+// FIXME: make it safe by specing out correctly
+fn itoa_coord_simd2_sse(a: u16, b: u16, out: *mut u8) -> u8 {
+    const DIV10: u16x16 = u16x16::from_array([
+        1, 1, 1, 10000, 1000, 100, 10, 1, 1, 1, 1, 10000, 1000, 100, 10, 1,
+    ]);
+    const DIV10_MASK: u16 = 0b0001111100011111u16;
+    // Both numbers concat'd
+    let cx8: u16x16 = simd_swizzle!(
+        u16x8::splat(a),
+        u16x8::splat(b),
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    );
+    let as_digits_pre: u16x16 = cx8 / DIV10;
+    let as_digits: u8x16 = (as_digits_pre % u16x16::splat(10)).cast();
+
+    // This is the actual digits we have. We mask of the [1,1,1] parts because they cannot count.
+    let mut nz_mask = (as_digits_pre.simd_ne(u16x16::splat(0))).to_bitmask() as u16 & DIV10_MASK;
+    nz_mask |= (1 << 0) | (1 << 8);
+    let mask_a = (nz_mask >> 8) as u8;
+    let mask_b = (nz_mask & 0xFF) as u8;
+    let a_lz = mask_a.leading_zeros() as u8;
+    let b_lz = mask_b.leading_zeros() as u8;
+
+    let strip_junk_mask = ((0xFFu8 << a_lz) as u16) << 0 | ((0xFFu8 << b_lz) as u16) << 8;
+    let as_digits_ascii = as_digits + u8x16::splat(b'0');
+    let as_digits_clean =
+        mask8x16::from_bitmask(strip_junk_mask.into()).select(as_digits_ascii, u8x16::splat(0));
+
+    unsafe {
+        let ascii_2: u64x2 = mem::transmute(as_digits_clean);
+        let [num_a, num_b] = ascii_2.to_array();
+
+        // whitespace: insert it in num_a
+        let num_a = num_a >> 8 | (b' ' as u64) << 56;
+        let a_lz = a_lz - 1;
+
+        // let a_ledge = num_a >> (a_lz * 8);
+        // let b_ledge = num_b >> (b_lz * 8);
+        // let write_2 = b_ledge >> (a_lz * 8);
+        // let b_fora = b_ledge >> ((8 - a_lz) * 8);
+        // let write_1 = a_ledge | b_fora;
+        // ptr::write_unaligned(out as *mut _, [write_1, write_2]);
+
+        let combined = (num_a as u128)  | ((num_b >> (b_lz * 8)) as u128) << 64;
+        let combined = combined >> (a_lz * 8);
+        ptr::write_unaligned(out as *mut _, combined);
+    }
+
+    let length = strip_junk_mask.count_ones() as u8;
+    let length = length + 1; // whitespace: +1
+    length
+}
+
 pub struct PixelflutBuilder<'a> {
     data_slice: &'a mut [u8],
     head_ptr: usize,
 }
 
 const PX_MAX_LENGTH: usize = b"PX 65336 65336 RRGGBBAA\r\n".len();
+
 impl<'a> PixelflutBuilder<'a> {
+    #[inline(always)]
     pub fn cmd_px(&mut self, x: Coord, y: Coord, color: Color) {
         // FIXME: unsound
         debug_assert!(self.check_capacity(1));
@@ -72,15 +195,14 @@ impl<'a> PixelflutBuilder<'a> {
         self.add_slice(b"\r\n");
     }
 
+    #[inline(always)]
     pub fn cmd_pxb(&mut self, x: Coord, y: Coord, color: Color) {
         debug_assert!(self.check_capacity(1));
 
         self.add_slice(b"PB");
         self.add_slice(&x.to_le_bytes());
         self.add_slice(&y.to_le_bytes());
-        self.add_slice(&[
-            color.r, color.g, color.b, color.a,
-        ]);
+        self.add_slice(&[color.r, color.g, color.b, color.a]);
     }
 
     pub fn with_capacity(data_slice: &'a mut [u8], max_px_count: usize) -> Self {
@@ -121,11 +243,57 @@ impl<'a> PixelflutBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::pixelflut_builder::{hex4_2le, itoa_coord};
+    use crate::pixelflut_builder::{hex4_2le, itoa_coord, itoa_coord_simd, itoa_coord_simd2_sse};
+    use test::Bencher;
 
     #[test]
     fn test_encoding_helpers() {
-        assert_eq!(hex4_2le(0xAABBCCDD), *b"DDCCBBAA");
+        assert_eq!(hex4_2le(0xAABBCCDD), *b"ddccbbaa");
         assert_eq!(itoa_coord(10050), *b"10050");
+
+        let mut out = *b"00000";
+        itoa_coord_simd(65300, &mut out);
+        assert_eq!(out, *b"65300");
+    }
+
+    #[test]
+    fn simd_encoding_helpers() {
+        let mut out = [0u8; 32];
+        let n1 = 60322;
+        let n2 = 65321;
+        let len = itoa_coord_simd2_sse(n1, n2, &mut out as *mut u8);
+        let out2 = String::from_utf8_lossy(&out[..len.into()]);
+        assert_eq!(format!("{n1} {n2}"), out2);
+    }
+
+    #[bench]
+    fn benchmark_itoa_simple(b: &mut Bencher) {
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            for _ in 0..(1920 * 1080) {
+                let out1 = itoa_coord(test::black_box(65300));
+                let out2 = itoa_coord(test::black_box(65321));
+                out[0..5].copy_from_slice(&out1);
+                out[5] = b' ';
+                out[6..11].copy_from_slice(&out2);
+                test::black_box(out);
+            }
+        });
+    }
+
+    #[bench]
+    fn benchmark_itoa_simd(b: &mut Bencher) {
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            for _ in 0..(1920 * 1080) {
+                let len = itoa_coord_simd2_sse(
+                    test::black_box(6500),
+                    test::black_box(6521),
+                    &mut out as *mut _,
+                );
+                test::black_box(out);
+                test::black_box(len);
+            }
+        });
     }
 }

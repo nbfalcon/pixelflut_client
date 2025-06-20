@@ -1,4 +1,7 @@
 #![feature(portable_simd)]
+#![feature(test)]
+extern crate test;
+
 pub mod blit_image;
 pub mod pixelflut_builder;
 pub mod pixelflut_gstreamer;
