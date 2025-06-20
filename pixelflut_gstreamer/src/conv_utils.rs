@@ -1,6 +1,7 @@
 use core::mem;
 use core::simd::{simd_swizzle, u8x4, u8x8};
 use std::arch::x86_64::_mm_storeu_si128;
+use std::mem::MaybeUninit;
 use std::simd::{mask8x16, u64x2};
 use std::{
     arch::x86_64,
@@ -51,27 +52,35 @@ pub(crate) fn itoa_coord(mut c: u16) -> [u8; 5] {
 }
 
 #[inline(always)]
-pub(crate) fn itoa_coord_simd(c: u16, out: &mut [u8; 5]) -> u8 {
-    if c == 0 {
-        out[0] = b'0';
-        1
-    } else {
-        let div10 = u16x8::from_array([1, 1, 1, 10000, 1000, 100, 10, 1]);
-        let cx8 = u16x8::splat(c);
+pub(crate) fn itoa_coord_simd(c: u16) -> [u8; 5] {
+    const DIV10_8: u16x8 = u16x8::from_array([1, 1, 1, 10000, 1000, 100, 10, 1]);
+    let cx8 = u16x8::splat(c);
+    let as_digits_pre = cx8 / DIV10_8;
+    let as_digits: u8x8 = (as_digits_pre % u16x8::splat(10)).cast();
+    let as_digits_ascii = as_digits + u8x8::splat(b'0');
 
-        let as_digits_pre = cx8 / div10;
-        let as_digits: u8x8 = (as_digits_pre % u16x8::splat(10)).cast();
-        let leading_zeroes_mask: u8 =
-            (as_digits.simd_ne(u8x8::splat(0)).to_bitmask() & 0b11111) as u8; // Mask out the leading [1,1,1]
+    let mut result = [0u8; 5];
+    result.copy_from_slice(&as_digits_ascii[3..8]);
+    result
+}
 
-        let start = leading_zeroes_mask.leading_zeros() as u8;
-        let length = 8 - start;
-        let inslice = &(as_digits + u8x8::splat(b'0')).to_array()[start as usize..];
-        let outslice = &mut out[..length as usize];
-        outslice.copy_from_slice(inslice);
+#[inline(always)]
+pub(crate) fn itoa_coord_simd_l(n: u16, out: &mut [u8; 8]) -> u8 {
+    const DIV10_8: u16x8 = u16x8::from_array([1, 1, 1, 10000, 1000, 100, 10, 1]);
+    let cx8 = u16x8::splat(n);
+    let as_digits_pre = cx8 / DIV10_8;
+    let as_digits: u8x8 = (as_digits_pre % u16x8::splat(10)).cast();
+    let as_digits_ascii = as_digits + u8x8::splat(b'0');
 
-        length
-    }
+    let leading_zeroes = as_digits.simd_ne(u8x8::splat(0)).to_bitmask() as u8;
+    let leading_zeroes = leading_zeroes | (1 << 7); // The most significant bit must always be included
+    let n_lz = leading_zeroes.trailing_zeros() as u8;
+    let as_digits_ascii_n: u64 = unsafe { mem::transmute(as_digits_ascii) };
+    // Now we remove the leading zeroes
+    let no_lz = as_digits_ascii_n >> (n_lz * 8);
+
+    out.copy_from_slice(&no_lz.to_le_bytes());
+    8 - n_lz
 }
 
 #[inline(always)]
@@ -162,17 +171,19 @@ pub(crate) fn itoa_coord_simd2_sse(a: u16, b: u16, out: *mut u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use crate::conv_utils::{hex4_2le, itoa_coord, itoa_coord_simd, itoa_coord_simd2_sse, itoa_coord_simd_l};
     use test::Bencher;
-    use crate::conv_utils::{hex4_2le, itoa_coord, itoa_coord_simd, itoa_coord_simd2_sse};
 
     #[test]
     fn test_encoding_helpers() {
         assert_eq!(hex4_2le(0xAABBCCDD), *b"ddccbbaa");
         assert_eq!(itoa_coord(10050), *b"10050");
+        assert_eq!(itoa_coord_simd(10050), *b"10050");
 
-        let mut out = *b"00000";
-        itoa_coord_simd(65300, &mut out);
-        assert_eq!(out, *b"65300");
+        let mut out = [0u8; 8];
+        let len = itoa_coord_simd_l(65300, &mut out);
+        assert_eq!(out[..len as usize], *b"65300");
+        assert_eq!(len, 5);
     }
 
     #[test]
@@ -190,11 +201,13 @@ mod tests {
         b.iter(|| {
             let mut out = [0u8; 32];
             for _ in 0..(1920 * 1080) {
-                let out1 = itoa_coord(test::black_box(65300));
-                let out2 = itoa_coord(test::black_box(65321));
-                out[0..5].copy_from_slice(&out1);
-                out[5] = b' ';
-                out[6..11].copy_from_slice(&out2);
+                let mut i = 0;
+                i += itoa_coord_simd_l(test::black_box(65300), (&mut out[0..8]).try_into().unwrap());
+                out[i as usize] = b' ';
+                i += itoa_coord_simd_l(test::black_box(65321), (&mut out[8..16]).try_into().unwrap());
+                out[i as usize..i as usize + 8].copy_from_slice(&hex4_2le(0xFFFFAABB));
+                i += 8;
+                out[i as usize..i as usize + 2].copy_from_slice(b"\r\n");
                 test::black_box(out);
             }
         });
