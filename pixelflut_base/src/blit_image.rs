@@ -12,7 +12,7 @@ pub struct ImageInfo {
     pub width: Coord,
     pub height: Coord,
 
-    pub stride_extra: u32,
+    pub stride: isize,
 }
 
 pub fn blit_image(
@@ -25,16 +25,16 @@ pub fn blit_image(
     assert!(out.check_capacity((image_info.height as usize) * (image_info.width as usize)));
     // println!("{}/{}", image_data.len(), image_info.stride_extra);
     assert!(
-        (image_info.width as usize + image_info.stride_extra as usize)
+        (image_info.width as usize + image_info.stride as usize)
             * (image_info.height as usize)
             * 4
-            - image_info.stride_extra as usize
+            - image_info.stride as usize
             <= image_data.len()
     );
 
     for y in 0..image_info.height {
         for x in 0..image_info.width {
-            let idx = (image_info.width as isize + image_info.stride_extra as isize) * (y as isize)
+            let idx = (image_info.width as isize + image_info.stride as isize) * (y as isize)
                 + (x as isize);
             let idxpx = idx * 4;
 

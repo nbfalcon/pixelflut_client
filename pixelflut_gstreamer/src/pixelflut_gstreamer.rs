@@ -1,8 +1,18 @@
+use std::sync::LazyLock;
+
 use gstreamer::{
     glib::{self, types::StaticType},
     Rank,
 };
 use gstreamer_video::gst_base;
+
+static CAT: LazyLock<gstreamer::DebugCategory> = LazyLock::new(|| {
+    gstreamer::DebugCategory::new(
+        "pixeltflut_gstreamer",
+        gstreamer::DebugColorFlags::empty(),
+        Some("Pixelflut Gstreamer"),
+    )
+});
 
 mod imp {
     use gstreamer::{
@@ -26,17 +36,21 @@ mod imp {
         },
         VideoFormat,
     };
-    use pixelflut_base::blit_image::*;
+    use pixelflut_base::blit_image_ng::{
+        encode_image, EncodeSettings, ImageData, ImageFormat, ImageMetadata,
+    };
     use pixelflut_base::{base::*, pixelflut_builder::PixelflutBuilder};
     use std::sync::{
         atomic::{AtomicU16, Ordering},
         LazyLock, Mutex,
     };
 
+    use crate::pixelflut_gstreamer::CAT;
+
     #[derive(Default)]
     pub struct PixelflutConvert {
         // FIXME: ImageInfo is POD, we can use non-Mutex
-        image: Mutex<ImageInfo>,
+        image: Mutex<Option<ImageMetadata>>,
 
         offset_x: AtomicU16,
         offset_y: AtomicU16,
@@ -116,20 +130,20 @@ mod imp {
 
             let len = {
                 let mut mapped_out = outbuf.map_writable().map_err(|_| FlowError::Error)?;
-                let image_info = self.image.lock().unwrap().clone();
-                let mut writer = PixelflutBuilder::with_xy_capacity(
-                    &mut mapped_out,
-                    image_info.width,
-                    image_info.height,
-                );
-                blit_image(
-                    &mut writer,
-                    &mapped_in,
-                    &image_info,
-                    self.offset_x.load(Ordering::Relaxed),
-                    self.offset_y.load(Ordering::Relaxed),
-                );
-                writer.as_slice().len()
+                let Some(image_info) = self.image.lock().unwrap().clone() else {
+                    return Err(gstreamer::FlowError::NotNegotiated);
+                };
+
+                let image = ImageData {
+                    pixels: mapped_in.as_ptr(),
+                    meta: image_info,
+                };
+                let settings = EncodeSettings {
+                    x_base: self.offset_x.load(Ordering::Relaxed),
+                    y_base: self.offset_y.load(Ordering::Relaxed),
+                };
+
+                unsafe { encode_image(&image, &mut mapped_out, &settings) }
             };
             outbuf.set_size(len);
 
@@ -141,8 +155,8 @@ mod imp {
             incaps: &gstreamer::Caps,
             _outcaps: &gstreamer::Caps,
         ) -> Result<(), gstreamer::LoggableError> {
-            let image_info = image_info_from_caps(incaps)?;
-            *self.image.lock().unwrap() = image_info;
+            let image_info = image_meta_from_caps(incaps)?;
+            *self.image.lock().unwrap() = Some(image_info);
 
             Ok(())
         }
@@ -154,27 +168,46 @@ mod imp {
             _size: usize,
             _othercaps: &gstreamer::Caps,
         ) -> Option<usize> {
-            image_info_from_caps(caps).ok().map(|image_info| {
+            image_meta_from_caps(caps).ok().map(|image_info| {
                 PixelflutBuilder::required_size(image_info.width, image_info.height)
             })
         }
     }
 
-    fn image_info_from_caps(
+    fn image_meta_from_caps(
         incaps: &gstreamer::Caps,
-    ) -> Result<ImageInfo, gstreamer::LoggableError> {
+    ) -> Result<ImageMetadata, gstreamer::LoggableError> {
         let videoinfo = gstreamer_video::VideoInfo::from_caps(incaps)?;
-        let stride = videoinfo.stride()[0];
-        let stride: u32 = stride.try_into().expect("BUG: Negative stride???");
-        let stride_extra = stride
-            .checked_sub(videoinfo.width() * 4)
-            .expect("BUG: Stride < width???");
-        let image_info = ImageInfo {
-            width: videoinfo.width() as u16,
-            height: videoinfo.height() as u16,
-            stride_extra,
+        let image_format = match videoinfo.format() {
+            VideoFormat::Rgba => ImageFormat::Rgba,
+            VideoFormat::Rgb => ImageFormat::Rgb,
+            VideoFormat::Rgbx => ImageFormat::Rgbx,
+            VideoFormat::Gray8 => ImageFormat::Gray,
+            invalid => {
+                return Err(gstreamer::LoggableError::new(
+                    *CAT,
+                    glib::bool_error!("Only {{Rgba,Rgb,Rgbx,Gray8}} is supported, got {invalid}"),
+                ))
+            }
         };
-        Ok(image_info)
+        let width = videoinfo.width();
+        let height = videoinfo.height();
+        if width % 10 != 0 || height != 0 {
+            return Err(gstreamer::LoggableError::new(
+                *CAT,
+                glib::bool_error!(
+                    "width/height must currently be divisible by 10; got w={width},h={height}"
+                ),
+            ));
+        }
+        let stride = videoinfo.stride()[0];
+
+        Ok(ImageMetadata {
+            stride: stride as isize,
+            image_format,
+            width: width as Coord,
+            height: height as Coord,
+        })
     }
 
     impl ElementImpl for PixelflutConvert {
@@ -199,9 +232,17 @@ mod imp {
                     &gstreamer::Caps::builder_full()
                         .structure(
                             Structure::builder("video/x-raw")
-                                .field("format", VideoFormat::Rgba.to_str())
-                                .field("width", gstreamer::IntRange::new(1, 65536 - 1))
-                                .field("height", gstreamer::IntRange::new(1, 65536 - 1))
+                                .field(
+                                    "format",
+                                    gstreamer::List::from_values([
+                                        VideoFormat::Rgba.to_str().into(),
+                                        VideoFormat::Rgb.to_str().into(),
+                                        VideoFormat::Rgbx.to_str().into(),
+                                        VideoFormat::Gray8.to_str().into(),
+                                    ]),
+                                )
+                                .field("width", gstreamer::IntRange::new(1, 9999))
+                                .field("height", gstreamer::IntRange::new(1, 9999))
                                 .build(),
                         )
                         .build(),
