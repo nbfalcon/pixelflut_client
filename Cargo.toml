@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "pixelflut_base",
-    "pixelflut_gstreamer",
+    "pixelflut_gstreamer"
 ]
 
 [workspace.package]

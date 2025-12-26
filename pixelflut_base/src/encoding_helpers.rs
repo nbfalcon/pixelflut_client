@@ -13,7 +13,7 @@ pub(crate) fn hex4_2le(number: u32) -> [u8; 8] {
     let number_preconverted = number_hi | number_lo;
 
     let number_lane = u8x8::from_array(number_preconverted.to_le_bytes());
-    let number_full: u8x8 = simd_swizzle!(number_lane, [0, 4, 1, 5, 2, 6, 3, 7]);
+    let number_full: u8x8 = simd_swizzle!(number_lane, [4, 0, 5, 1, 6, 2, 7, 3]);
 
     // Somehow, this generates waayyy bigger code
     // const DIGITS: Simd<u8, 16> = u8x16::from_array(*b"0123456789ABCDEF");
@@ -32,7 +32,7 @@ pub(crate) fn hex3_2le(number: u32) -> [u8; 8] {
     let number_preconverted = number_hi | number_lo;
 
     let number_lane = u8x8::from_array(number_preconverted.to_le_bytes());
-    let number_full: u8x8 = simd_swizzle!(number_lane, [0, 4, 1, 5, 2, 6, 3, 7]);
+    let number_full: u8x8 = simd_swizzle!(number_lane, [4, 0, 5, 1, 6, 2, 7, 3]);
 
     // Somehow, this generates waayyy bigger code
     // const DIGITS: Simd<u8, 16> = u8x16::from_array(*b"0123456789ABCDEF");
@@ -202,7 +202,7 @@ pub(crate) unsafe fn write_px_rgba(out: *mut u8, x: u16, y: u16, pixel: u32) -> 
 
 #[cfg(test)]
 mod tests {
-    use crate::encoding_helpers::{hex4_2le, itoa_cooard_x2, itoa_coord_simd, write_px_rgba};
+    use crate::encoding_helpers::{hex3_2le, hex4_2le, itoa_cooard_x2, itoa_coord_simd, write_px_rgba};
     use test::Bencher;
 
     #[test]
@@ -268,5 +268,11 @@ mod tests {
                 std::hint::black_box(len);
             }
         });
+    }
+
+    #[test]
+    pub fn hex_tests() {
+        assert_eq!(hex4_2le(0xAB), *b"ab000000");
+        assert_eq!(hex3_2le(0xABCCDD), *b"ddccab\0\0");
     }
 }
