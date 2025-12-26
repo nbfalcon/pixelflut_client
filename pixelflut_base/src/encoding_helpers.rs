@@ -1,8 +1,8 @@
-use core::hint::*;
-use core::mem;
+use crate::base::*;
+use core::arch::x86_64::*;
+use core::mem::transmute;
 use core::simd::*;
 use core::simd::{cmp::*, num::*};
-use std::arch::x86_64::_mm_shuffle_epi8;
 
 // Convert a native-endian number to hybrid-little-endian hex
 // The bytes are in little-endian order, but each byte is two hex digits, with the most significant being first.
@@ -78,7 +78,7 @@ pub(crate) fn itoa_coord_simd(n: u16) -> ([u8; 8], u8) {
     let leading_zeroes = (as_digits.simd_ne(u8x8::splat(0)).to_bitmask() as u8) & 0b11111000;
     let leading_zeroes = leading_zeroes | (1 << 7); // The most significant bit must always be included, since "0" must be written out as well
     let n_lz = leading_zeroes.trailing_zeros() as u8;
-    let as_digits_ascii_n: u64 = unsafe { mem::transmute(as_digits_ascii) };
+    let as_digits_ascii_n: u64 = unsafe { transmute(as_digits_ascii) };
     // Now we remove the leading zeroes
     let no_lz = as_digits_ascii_n >> (n_lz * 8);
 

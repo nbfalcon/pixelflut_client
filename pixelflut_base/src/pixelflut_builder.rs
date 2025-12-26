@@ -1,5 +1,6 @@
-use std::ptr;
+use crate::base::*;
 use crate::encoding_helpers::write_px_rgba;
+use core::ptr;
 
 #[repr(C)]
 // RGBA_LE32
@@ -9,8 +10,6 @@ pub struct Color {
     pub b: u8,
     pub a: u8,
 }
-
-pub type Coord = u16;
 
 pub struct PixelflutBuilder<'a> {
     data_slice: &'a mut [u8],

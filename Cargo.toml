@@ -13,3 +13,6 @@ version = "0.1.0"
 arrayvec = "0.7.6"
 gstreamer = "0.23.4"
 gstreamer-video = "0.23.4"
+rayon = "1.11.0"
+
+pixelflut_base = { path = "./pixelflut_base" }

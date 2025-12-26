@@ -1,13 +1,4 @@
-#![feature(portable_simd)]
-#![feature(test)]
-extern crate test;
-
-pub mod blit_image;
-pub mod pixelflut_builder;
-pub mod pixelflut_gstreamer;
-mod encoding_helpers;
-pub mod encoding_ng;
-
+mod pixelflut_gstreamer;
 use pixelflut_gstreamer::plugin_init;
 
 gstreamer::plugin_define!(

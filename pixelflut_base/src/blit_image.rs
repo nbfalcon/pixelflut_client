@@ -1,6 +1,6 @@
-use std::ptr;
-
-use crate::pixelflut_builder::{Color, Coord, PixelflutBuilder};
+use core::ptr;
+use crate::base::*;
+use crate::pixelflut_builder::{Color, PixelflutBuilder};
 
 pub enum ImageFormat {
     Rgb,
@@ -15,11 +15,19 @@ pub struct ImageInfo {
     pub stride_extra: u32,
 }
 
-pub fn blit_image(out: &mut PixelflutBuilder, image_data: &[u8], image_info: &ImageInfo, offset_x: Coord, offset_y: Coord) {
+pub fn blit_image(
+    out: &mut PixelflutBuilder,
+    image_data: &[u8],
+    image_info: &ImageInfo,
+    offset_x: Coord,
+    offset_y: Coord,
+) {
     assert!(out.check_capacity((image_info.height as usize) * (image_info.width as usize)));
     // println!("{}/{}", image_data.len(), image_info.stride_extra);
     assert!(
-        (image_info.width as usize + image_info.stride_extra as usize) * (image_info.height as usize) * 4
+        (image_info.width as usize + image_info.stride_extra as usize)
+            * (image_info.height as usize)
+            * 4
             - image_info.stride_extra as usize
             <= image_data.len()
     );

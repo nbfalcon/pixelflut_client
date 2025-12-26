@@ -1,14 +1,10 @@
+use crate::base::*;
+use crate::encoding_helpers::*;
 use core::arch::x86_64::*;
 use core::mem::transmute;
 use core::ptr;
 use core::simd::cmp::*;
 use core::simd::*;
-
-use crate::encoding_helpers::hex3_2le;
-use crate::encoding_helpers::hex4_2le;
-
-pub type Coord = u16;
-pub type SkipLength = usize;
 
 #[inline(always)]
 fn simd_shift_left(v: u8x16, n: i8) -> u8x16 {
@@ -35,19 +31,6 @@ fn simd_shift_right(v: u8x16, n: u8) -> u8x16 {
     unsafe { transmute(_mm_shuffle_epi8(transmute(v), transmute(idx))) }
 }
 
-// #[inline(always)]
-// fn simd_shift_left_inbounds(v: u8x16, n: i8) -> u8x16 {
-//     let idx_id = i8x16::from_array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
-//     let idx = idx_id + i8x16::splat(n); // Lower lanes will choose higher lanes, i.e. higher lanes migrate down
-
-//     unsafe { transmute(_mm_shuffle_epi8(transmute(v), transmute(idx))) }
-// }
-
-// #[inline(always)]
-// fn simd_shift_right_inbounds(v: u8x16, n: i8) -> u8x16 {
-//     simd_shift_left_inbounds(v, -n)
-// }
-
 const fn simd_mask(mask: u16) -> u8x16 {
     let mut mask_a = [0u8; 16];
     let mut i = 0;
@@ -59,20 +42,6 @@ const fn simd_mask(mask: u16) -> u8x16 {
     }
     u8x16::from_array(mask_a)
 }
-
-// // TODO: for some reason, arch::_mm_blend_epi16 does not generate a single vpblendw instruction, which is bullshit
-// // Instead we get two shuffles with massive operands.
-// unsafe fn _mm_blend_epi16<const MASK: u8>(x: __m128i, y: __m128i) -> __m128i {
-//     let result: __m128i;
-//     asm!(
-//         "vpblendw {0}, {1}, {2}, {3}",
-//         out(xmm_reg) result,
-//         in(xmm_reg) x,
-//         in(xmm_reg) y,
-//         const MASK,
-//     );
-//     result
-// }
 
 pub unsafe fn encode_offset_command(x: Coord, y: Coord, out: *mut u8) -> SkipLength {
     let xxxxyyyy: u16x8 = transmute(_mm_unpacklo_epi64(
@@ -189,8 +158,10 @@ pub fn encode_px_command_lite_gray(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::hint::black_box;
     use rayon::prelude::*;
     use std::io::Write;
+    use test::Bencher;
 
     type SmallVec = arrayvec::ArrayVec<u8, 128>;
 
@@ -209,7 +180,11 @@ mod tests {
         r
     }
 
-    fn helper_encode_px_command_lite_rgba(x: MiniCoord, y: MiniCoord, value: RgbaValue) -> SmallVec {
+    fn helper_encode_px_command_lite_rgba(
+        x: MiniCoord,
+        y: MiniCoord,
+        value: RgbaValue,
+    ) -> SmallVec {
         let mut r = SmallVec::new();
         r.extend(0..16);
         let len =
@@ -247,6 +222,63 @@ mod tests {
                 let reference = reference_encode_offset_command(x, y);
                 let actual = helper_encode_offset_command(x, y);
                 assert_eq!(reference, actual);
+            }
+        });
+    }
+
+    #[bench]
+    fn benchmark_encode_offset_simple(b: &mut Bencher) {
+        b.iter(|| {
+            // Current benchmarks on my laptop indicate: 8ms/1s is spent in OFFSET, which is very good.
+            for _ in 0..(1920 * 1080 * 60 / 100) {
+                let mut out = black_box([0u8; 32]);
+                unsafe {
+                    let len = encode_offset_command(
+                        black_box(1234),
+                        black_box(4321),
+                        black_box(out.as_mut_ptr()),
+                    );
+                    black_box(len);
+                }
+            }
+        });
+    }
+
+    #[bench]
+    fn benchmark_encode_video_framerate(b: &mut Bencher) {
+        b.iter(|| {
+            let width: Coord = black_box(1920);
+            let height: Coord = black_box(1080);
+            let x_base: Coord = black_box(0);
+            let y_base: Coord = black_box(0);
+
+            let mut out = [0u8; 32];
+            let mut out2 = [0u8; 32];
+            for y_chunk in 0..height.div_ceil(10) {
+                for x_chunk in 0..width.div_ceil(10) {
+                    unsafe {
+                        let len = encode_offset_command(
+                            x_chunk + x_base,
+                            y_chunk + y_base,
+                            out.as_mut_ptr(),
+                        );
+                        black_box(len);
+                        black_box(out);
+                    }
+
+                    for dy in 0..9 {
+                        for dx in 0..9 {
+                            let color = black_box(0x00ccbbaa) /* fetch color */;
+                            encode_px_command_lite_rgba(
+                                dx,
+                                dy,
+                                color,
+                                (&mut out2[..16]).try_into().unwrap(),
+                            );
+                            black_box(out2);
+                        }
+                    }
+                }
             }
         });
     }

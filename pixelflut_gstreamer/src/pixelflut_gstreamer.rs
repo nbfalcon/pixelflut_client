@@ -5,10 +5,6 @@ use gstreamer::{
 use gstreamer_video::gst_base;
 
 mod imp {
-    use crate::{
-        blit_image::{blit_image, ImageInfo},
-        pixelflut_builder::{Coord, PixelflutBuilder},
-    };
     use gstreamer::{
         glib::{
             self,
@@ -30,6 +26,8 @@ mod imp {
         },
         VideoFormat,
     };
+    use pixelflut_base::blit_image::*;
+    use pixelflut_base::{base::*, pixelflut_builder::PixelflutBuilder};
     use std::sync::{
         atomic::{AtomicU16, Ordering},
         LazyLock, Mutex,
@@ -208,7 +206,7 @@ mod imp {
                         )
                         .build(),
                 )
-                .unwrap();  
+                .unwrap();
                 let src = PadTemplate::new(
                     "src",
                     PadDirection::Src,

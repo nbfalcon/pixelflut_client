@@ -1,14 +1,11 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+#![feature(portable_simd)]
+#![feature(test)]
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod base;
+pub mod blit_image;
+pub mod encoding_helpers;
+pub mod encoding_ng;
+pub mod blit_image_ng;
+pub mod pixelflut_builder;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+extern crate test;
