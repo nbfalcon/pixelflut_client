@@ -92,7 +92,7 @@ pub unsafe fn encode_offset_command(x: Coord, y: Coord, out: *mut u8) -> SkipLen
 pub type MiniCoord = u8; // 0..9
 pub type RgbaValue = u32;
 pub type RgbValue = u32;
-pub type GrayValue = u32;
+pub type GrayValue = u8;
 /// An "output" slice type, large enough so that one can easily implement SIMD shenanigans
 /// It might be oversized for the various PX commands, but this is important for SIMD algorithms.
 pub type OutSlice<'a> = &'a mut [u8; 16];
@@ -139,16 +139,16 @@ pub fn encode_px_command_lite_rgb(
 pub fn encode_px_command_lite_gray(
     x: MiniCoord,
     y: MiniCoord,
-    value: u8,
+    value: GrayValue,
     out: OutSlice,
 ) -> StaticSkip<10> {
-    let as_hex = *b"0123456789ABCDEF";
+    let as_hex: &[u8; 16] = b"0123456789abcdef";
     let g_lo = as_hex[(value & 0xF) as usize];
     let g_hi = as_hex[(value >> 4) as usize];
 
-    out[..8].copy_from_slice(b"PX x y g");
-    out[3] = x;
-    out[5] = y;
+    out[..8].copy_from_slice(b"PX 0 0 g");
+    out[3] += x;
+    out[5] += y;
     out[7] = g_hi;
     out[8] = g_lo;
     out[9] = b'\n';
@@ -195,6 +195,21 @@ mod tests {
         r
     }
 
+    fn helper_encode_px_command_lite_gray(
+        x: MiniCoord,
+        y: MiniCoord,
+        value: GrayValue,
+    ) -> SmallVec {
+        let mut r = SmallVec::new();
+        r.extend(0..16);
+        let len =
+            encode_px_command_lite_gray(x, y, value, r.as_mut_slice().try_into().unwrap()).into();
+        unsafe {
+            r.set_len(len);
+        }
+        r
+    }
+
     #[test]
     pub fn encode_tests_basic() {
         assert_eq!(
@@ -212,6 +227,10 @@ mod tests {
         assert_eq!(
             helper_encode_px_command_lite_rgba(1, 2, 0xcc23aa).as_slice(),
             b"PX 1 2 aa32cc00\n"
+        );
+        assert_eq!(
+            helper_encode_px_command_lite_gray(1, 2, 0xaf).as_slice(),
+            b"PX 1 2 fa\n"
         );
     }
 

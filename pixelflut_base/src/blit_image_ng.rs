@@ -65,10 +65,8 @@ pub unsafe fn encode_image(image: &ImageData, out: &mut [u8], settings: &EncodeS
     assert!(out.len() >= calc_pixelflut_frame_size(image.meta.width, image.meta.height, ImageFormat::Rgba));
 
     let mut writeptr = out.as_mut_ptr();
-    let mut imagedataptr_strided = image.pixels;
 
     for y_chunk in 0..image.meta.height / 10 {
-        let mut imagedataptr = imagedataptr_strided;
         for x_chunk in 0..image.meta.width / 10 {
             unsafe {
                 let len = encode_offset_command(
@@ -81,6 +79,10 @@ pub unsafe fn encode_image(image: &ImageData, out: &mut [u8], settings: &EncodeS
 
             for dy in 0..9 {
                 for dx in 0..9 {
+                    let real_y = (y_chunk * 10 + dy as u16) as isize;
+                    let real_x = (x_chunk * 10 + dx as u16) as isize;
+                    let imagedataptr = image.pixels.byte_offset(image.meta.stride * real_y + image.pixel_stride() as isize * real_x);
+
                     unsafe {
                         let wslice = &mut *(writeptr as *mut _);
                         let write_len: usize = match image.meta.image_format {
@@ -102,14 +104,9 @@ pub unsafe fn encode_image(image: &ImageData, out: &mut [u8], settings: &EncodeS
                             }
                         };
                         writeptr = writeptr.byte_add(write_len);
-                        imagedataptr = imagedataptr.byte_add(image.pixel_stride());
                     }
                 }
             }
-        }
-
-        unsafe {
-            imagedataptr_strided = imagedataptr_strided.byte_offset(image.meta.stride);
         }
     }
 
