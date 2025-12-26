@@ -16,6 +16,7 @@ path = "src/lib.rs"
 arrayvec.workspace = true
 gstreamer.workspace = true
 gstreamer-video.workspace = true
+rayon = "1.11.0"
 
 [build-dependencies]
 gst-plugin-version-helper = "0.8.2"

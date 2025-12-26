@@ -1,23 +1,19 @@
+use core::hint::*;
 use core::mem;
-use core::simd::{simd_swizzle, u8x4, u8x8};
-use std::ptr;
-use std::simd::{
-    cmp::{SimdPartialEq, SimdPartialOrd},
-    num::SimdUint,
-    u16x8,
-};
+use core::simd::*;
+use core::simd::{cmp::*, num::*};
+use std::arch::x86_64::_mm_shuffle_epi8;
 
 // Convert a native-endian number to hybrid-little-endian hex
 // The bytes are in little-endian order, but each byte is two hex digits, with the most significant being first.
 #[inline(always)]
 pub(crate) fn hex4_2le(number: u32) -> [u8; 8] {
-    let number_hi = (number & 0xF0F0F0F0) >> 4;
-    let number_lo = number & 0x0F0F0F0F;
+    let number_hi = ((number & 0xF0F0F0F0u32) as u64) << (32 - 4);
+    let number_lo = ((number & 0x0F0F0F0Fu32) as u64) << 0;
+    let number_preconverted = number_hi | number_lo;
 
-    let number_hi_s = u8x4::from(number_hi.to_le_bytes());
-    let number_lo_s = u8x4::from(number_lo.to_le_bytes());
-    // NOTE: This compiles to one interleave. .interleave() gives us two vectors, and I don't know how to work with that
-    let number_full: u8x8 = simd_swizzle!(number_hi_s, number_lo_s, [0, 4, 1, 5, 2, 6, 3, 7]);
+    let number_lane = u8x8::from_array(number_preconverted.to_le_bytes());
+    let number_full: u8x8 = simd_swizzle!(number_lane, [0, 4, 1, 5, 2, 6, 3, 7]);
 
     // Somehow, this generates waayyy bigger code
     // const DIGITS: Simd<u8, 16> = u8x16::from_array(*b"0123456789ABCDEF");
@@ -26,6 +22,29 @@ pub(crate) fn hex4_2le(number: u32) -> [u8; 8] {
 
     let le_10 = number_full.simd_lt(u8x8::splat(10));
     let to_ascii = le_10.select(u8x8::splat(b'0'), u8x8::splat(b'a' - 10));
+    (number_full + to_ascii).to_array()
+}
+
+#[inline(always)]
+pub(crate) fn hex3_2le(number: u32) -> [u8; 8] {
+    let number_hi = ((number & 0x00F0F0F0u32) as u64) << (32 - 4);
+    let number_lo = ((number & 0x000F0F0Fu32) as u64) << 0;
+    let number_preconverted = number_hi | number_lo;
+
+    let number_lane = u8x8::from_array(number_preconverted.to_le_bytes());
+    let number_full: u8x8 = simd_swizzle!(number_lane, [0, 4, 1, 5, 2, 6, 3, 7]);
+
+    // Somehow, this generates waayyy bigger code
+    // const DIGITS: Simd<u8, 16> = u8x16::from_array(*b"0123456789ABCDEF");
+    // let ascii = DIGITS.swizzle_dyn(number_full.resize(0xFF));
+    // ascii.resize(0xFF).to_array()
+
+    #[inline(always)]
+    fn array6(x: u8) -> u8x8 {
+        u8x8::from_array([x, x, x, x, x, x, 0, 0])
+    }
+    let le_10 = number_full.simd_lt(u8x8::splat(10));
+    let to_ascii = le_10.select(array6(b'0'), array6(b'a' - 10));
     (number_full + to_ascii).to_array()
 }
 
@@ -68,39 +87,122 @@ pub(crate) fn itoa_coord_simd(n: u16) -> ([u8; 8], u8) {
     (out, length)
 }
 
+// TODO: Plan of implementation
+// 1. Shift the output to the right by 3
+// 2. Add "PX " as SIMD vector to the front
+// 3. Implement itoa hex with newline at the end
+// 4. Double store unaligned
+// 5. Increment
+// #[inline(always)]
+pub fn itoa_cooard_x2(a: u16, b: u16) -> (u8x16, u32) {
+    // let both = u16x16::from_array([0, 0, 0, a, a, a, a, a, 0, 0, 0, b, b, b, b, b]);
+    let both = u16x16::from_array([a, a, a, a, a, a, a, a, b, b, b, b, b, b, b, b]);
+
+    const DIV10_16: u16x16 = u16x16::from_array([
+        // The leading ones are placeholders and will be zeroed anyway
+        1, 1, 1, 10000, 1000, 100, 10, 1, 1, 1, 1, 10000, 1000, 100, 10, 1,
+    ]);
+    let digits = both / DIV10_16;
+    // Placing the and here after the division makes the code more optimal (instead of at both =)
+    let digits = digits
+        & u16x16::from_array([
+            0x0, 0x0, 0x0, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0x0, 0x0, 0x0, 0xFFFF, 0xFFFF,
+            0xFFFF, 0xFFFF, 0xFFFF,
+        ]);
+    let digits_10: u8x16 = (digits % u16x16::splat(10)).cast();
+    let digits_10 = digits_10
+        + u8x16::from_array([
+            0,
+            0,
+            0,
+            // We add the ascii 0 to digits only. There will be a gap in the middle,
+            // which we fill with a space. However, we can't conditionally insert
+            // at a dynamic index, so instead we add a space everywhere.
+            // '0' - space + space -> digit; \0 + space -> space :)
+            b'0'.wrapping_sub(b' '),
+            b'0'.wrapping_sub(b' '),
+            b'0'.wrapping_sub(b' '),
+            b'0'.wrapping_sub(b' '),
+            b'0'.wrapping_sub(b' '),
+            0,
+            0,
+            0,
+            b'0'.wrapping_sub(b' '),
+            b'0'.wrapping_sub(b' '),
+            b'0'.wrapping_sub(b' '),
+            b'0'.wrapping_sub(b' '),
+            b'0'.wrapping_sub(b' '),
+        ]);
+
+    let where_nz = digits.simd_ne(u16x16::splat(0)).to_bitmask() as u32;
+    // Each number must have at least *1* digit (even if x or y are zero),
+    // so the least-significant digit cannot be "equal to zero".
+    // I.e. each number has length at least length 1 <-> 8 - len(a) <= 7;
+    // Note that the "zero" positions of where_nz (the three leading empty digits of each group) are guaranteed
+    // to be zero.
+    let where_nz = where_nz | 0b1000000010000000;
+    let alen_8 /* 8 - len(a) */ = ((where_nz & 0xFF) as u8).trailing_zeros();
+    let alen = 8 - alen_8;
+    let blen_8 /* 8 - len(b) */ = ((where_nz >> 8) as u8).trailing_zeros();
+    let total_len = where_nz.count_ones() /* whitespace */ + 1;
+
+    // a_aligned = "digits_10"[left_half] << (shift to the left visually, i.e. towards least-significant digits) (8 - len(a))
+    // This way, a's number goes to the very left.
+    // We also, at this point, completely ignore b's decimal repr
+    let a_aligned: u8x16 = unsafe {
+        _mm_shuffle_epi8(
+            digits_10.into(),
+            (u8x16::from_array([
+                // len(a) <= 5, so we care about only the first 5 digits. The rest we mask out so that we get less noise
+                0, 1, 2, 3, 4, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+            ]) + u8x16::splat(alen_8 as u8))
+            .into(),
+        )
+        .into()
+    };
+    // We do the same for b, but with a few caveats:
+    // 1. We of course take the digits from the second half
+    // 2. We then shift them to the _right_ (visually!) again by len(a) (sic!), so we don't overwrite eachother.
+    // digits << 8 "upper half" << (8 - len(b)) >> len(a)
+    let b_aligned: u8x16 = unsafe {
+        _mm_shuffle_epi8(
+            digits_10.into(),
+            // Only 11 elements in the array are technically needed, since two u16s cannot possibly be more than 10 digits
+            // (We want to have a space here in the future)
+            (u8x16::from_array([8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
+                + u8x16::splat(
+                    (blen_8 as i32 - (alen as i32) - 1/* Leave 1 room for the whitespace */) as i8
+                        as u8,
+                ))
+            .into(),
+        )
+        .into()
+    };
+
+    // We take the first a_len digits from a, and the rest from b.
+    let a_digits_mask = u8x16::from_array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+        .simd_le(u8x16::splat(alen as u8));
+    let comb_digits = a_digits_mask.select(a_aligned, b_aligned);
+
+    // Finally, we have to insert the space.
+    let comb_digits = comb_digits + u8x16::splat(b' ');
+
+    (comb_digits, total_len)
+}
+
 /// Generates a PX command (ascii) for an RGB pixel.
 /// Returns: the resulting length
 #[inline(always)]
-pub(crate) unsafe fn write_px_rgba(out: *mut u8, x: u16, y: u16, pixel: u32) -> u8 {
-    let (x, x_len) = itoa_coord_simd(x);
-    let (y, y_len) = itoa_coord_simd(y);
-    let x = u64::from_le_bytes(x);
-    let y = u64::from_le_bytes(y);
-    let hex = u64::from_le_bytes(hex4_2le(pixel | 0xFF000000u32));
+pub(crate) unsafe fn write_px_rgba(out: *mut u8, x: u16, y: u16, pixel: u32) -> usize {
+    // let (digits, a_tz, b_tz) = itoa_cooard_x2(x, y);
 
-    // Add formattig
-    let x_px = (x << 24) | (u32::from_le_bytes(*b"PX \0") as u64);
-    let y_spc = (y << 8) | (b' ' as u64) | (b' ' as u64) << ((y_len + 1) * 8);
-
-    unsafe {
-        ptr::write_unaligned(out.byte_offset(0) as *mut _, x_px);
-        ptr::write_unaligned(out.byte_offset((x_len + 3) as isize) as *mut _, y_spc);
-        ptr::write_unaligned(
-            out.byte_offset((x_len + 3 + y_len + 2) as isize) as *mut _,
-            hex,
-        );
-        ptr::write_unaligned(
-            out.byte_offset((x_len + 3 + y_len + 2 + 8) as isize) as *mut _,
-            *b"\n",
-        );
-    }
-    let total = 3 + x_len + 1 + y_len + 1 + 8 + 1 as u8;
-    total
+    // let shuffle = u8x16::from_array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    0
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::encoding_helpers::{hex4_2le, itoa_coord_simd, write_px_rgba};
+    use crate::encoding_helpers::{hex4_2le, itoa_cooard_x2, itoa_coord_simd, write_px_rgba};
     use test::Bencher;
 
     #[test]
@@ -114,6 +216,15 @@ mod tests {
         let (out, len) = itoa_coord_simd(1);
         assert_eq!(out[..len as usize], *b"1");
         assert_eq!(len, 1);
+    }
+
+    #[test]
+    fn test_atoi_x2() {
+        for (a, b) in [(12345, 23456), (300, 300), (10, 200), (310, 30), (0, 1)] {
+            let (encoded, len) = itoa_cooard_x2(a, b);
+            let encoded_b = &encoded.to_array()[..len as usize];
+            assert_eq!(encoded_b, format!("{a} {b}").as_bytes(), "a: {a}, b: {b}")
+        }
     }
 
     #[test]

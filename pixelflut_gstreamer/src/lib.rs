@@ -6,6 +6,7 @@ pub mod blit_image;
 pub mod pixelflut_builder;
 pub mod pixelflut_gstreamer;
 mod encoding_helpers;
+pub mod encoding_ng;
 
 use pixelflut_gstreamer::plugin_init;
 
