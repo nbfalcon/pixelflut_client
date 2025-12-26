@@ -192,7 +192,7 @@ mod imp {
         };
         let width = videoinfo.width();
         let height = videoinfo.height();
-        if width % 10 != 0 || height != 0 {
+        if width % 10 != 0 || height % 10 != 0 {
             return Err(gstreamer::LoggableError::new(
                 *CAT,
                 glib::bool_error!(
