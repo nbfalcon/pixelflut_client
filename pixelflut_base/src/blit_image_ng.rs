@@ -70,15 +70,15 @@ pub unsafe fn encode_image(image: &ImageData, out: &mut [u8], settings: &EncodeS
         for x_chunk in 0..image.meta.width / 10 {
             unsafe {
                 let len = encode_offset_command(
-                    x_chunk + settings.x_base,
-                    y_chunk + settings.y_base,
+                    x_chunk * 10 + settings.x_base,
+                    y_chunk * 10 + settings.y_base,
                     writeptr,
                 );
                 writeptr = writeptr.add(len);
             }
 
-            for dy in 0..9 {
-                for dx in 0..9 {
+            for dy in 0..=9 {
+                for dx in 0..=9 {
                     let real_y = (y_chunk * 10 + dy as u16) as isize;
                     let real_x = (x_chunk * 10 + dx as u16) as isize;
                     let imagedataptr = image.pixels.byte_offset(image.meta.stride * real_y + image.pixel_stride() as isize * real_x);
