@@ -45,7 +45,10 @@ mod imp {
         LazyLock, Mutex,
     };
 
-    use crate::pixelflut_gstreamer::CAT;
+    use crate::{
+        partitioned_buffer::{attach_to_buffer, BufferPartitionBin, BufferPartitionMetadataParams},
+        pixelflut_gstreamer::CAT,
+    };
 
     #[derive(Default)]
     pub struct PixelflutConvert {
@@ -146,6 +149,12 @@ mod imp {
                 unsafe { encode_image(&image, &mut mapped_out, &settings) }
             };
             outbuf.set_size(len);
+            attach_to_buffer(
+                outbuf,
+                BufferPartitionMetadataParams {
+                    bins: vec![BufferPartitionBin { offset: 0, len }],
+                },
+            );
 
             Ok(FlowSuccess::Ok)
         }

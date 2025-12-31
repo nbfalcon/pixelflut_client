@@ -1,4 +1,6 @@
 mod pixelflut_gstreamer;
+mod partitioned_buffer;
+
 use pixelflut_gstreamer::plugin_init;
 
 gstreamer::plugin_define!(
