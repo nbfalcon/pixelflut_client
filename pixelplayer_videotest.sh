@@ -17,6 +17,6 @@ echo "  size   = ${WIDTH}x${HEIGHT}"
 
 gst-launch-1.0 -e -vvvv \
   videotestsrc ! "video/x-raw,format=RGBA,width=$WIDTH,height=$HEIGHT" ! queue ! \
-  videorate ! 'video/x-raw,framerate=(fraction)60/1' ! \
+  videorate ! 'video/x-raw,framerate=(fraction)30/1' ! \
   rsimage2pixelflut offset-x=0 offset-y=0 partitions=6 ! \
-  queue ! pxmultitcpsink hosts="$HOST:$PORT#20" threads=6
+  queue ! rsduplicator copies=3 ! pxmultitcpsink hosts="$HOST:$PORT#20" threads=6

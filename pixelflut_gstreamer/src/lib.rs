@@ -9,11 +9,14 @@ use gstreamer::{
     Rank,
 };
 
-use crate::{pxmultitcpsink::PXMultiTCPSink, rsimage2pixelflut::PixelflutConvert};
+use crate::{
+    pxmultitcpsink::PXMultiTCPSink, rsduplicator::Duplicator, rsimage2pixelflut::PixelflutConvert,
+};
 
 pub(crate) mod connectionpool;
 pub(crate) mod partitioned_buffer_meta;
 mod pxmultitcpsink;
+mod rsduplicator;
 mod rsimage2pixelflut;
 pub(crate) mod simplethreadpool;
 
@@ -29,6 +32,12 @@ fn plugin_init(plugin: &gstreamer::Plugin) -> Result<(), glib::BoolError> {
         "pxmultitcpsink",
         Rank::NONE,
         PXMultiTCPSink::static_type(),
+    )?;
+    gstreamer::Element::register(
+        Some(plugin),
+        "rsduplicator",
+        Rank::NONE,
+        Duplicator::static_type(),
     )?;
     Ok(())
 }
