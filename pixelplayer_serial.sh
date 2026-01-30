@@ -20,8 +20,6 @@ echo "  size   = ${WIDTH}x${HEIGHT}"
 gst-launch-1.0 -e -vvvv \
   filesrc location="$FILE" ! queue ! decodebin ! queue ! \
   videoconvert ! videoscale ! \
-  video/x-raw,format=GRAY8,width=$WIDTH,height=$HEIGHT ! \
-  rsimage2pixelflut offset-x=0 offset-y=0 ! \
-  fakesink sync=false
-
-  #tcpclientsink host="$HOST" port="$PORT"
+  video/x-raw,format=RGBA,width=$WIDTH,height=$HEIGHT ! \
+  rsimage2pixelflut offset-x=840 offset-y=360 ! \
+  tcpclientsink host="$HOST" port="$PORT" sync=true

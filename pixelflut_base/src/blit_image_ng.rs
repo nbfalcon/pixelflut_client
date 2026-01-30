@@ -16,7 +16,7 @@ pub enum ImageFormat {
     Gray,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ImageMetadata {
     pub stride: isize,
     pub image_format: ImageFormat,
@@ -24,10 +24,14 @@ pub struct ImageMetadata {
     pub height: Coord,
 }
 
+#[derive(Clone)]
 pub struct ImageData {
     pub pixels: *const u8,
     pub meta: ImageMetadata,
 }
+
+unsafe impl Send for ImageData {}
+unsafe impl Sync for ImageData {}
 
 impl ImageData {
     pub fn pixel_stride(&self) -> usize {
@@ -36,6 +40,13 @@ impl ImageData {
             ImageFormat::Rgb => 3,
             ImageFormat::Rgbx => 4,
             ImageFormat::Gray => 1,
+        }
+    }
+
+    pub fn slice_rows(&self, row_start: Coord, row_end: Coord) -> ImageData {
+        ImageData {
+            pixels: unsafe { self.pixels.byte_offset(self.meta.stride * (row_start as isize)) },
+            meta: ImageMetadata { height: row_end - row_start, ..self.meta.clone() }
         }
     }
 }
@@ -59,6 +70,10 @@ pub fn calc_pixelflut_frame_size(width: Coord, height: Coord, image_format: Imag
         * (b"PX 1 1 \n".len() + pixel_data_len);
     let slack = 16;
     offset_commands + px_commands + slack
+}
+
+pub fn calc_pixelflut_image_meta_size(image: ImageMetadata) -> usize {
+    calc_pixelflut_frame_size(image.width, image.height, image.image_format)
 }
 
 pub unsafe fn encode_image(image: &ImageData, out: &mut [u8], settings: &EncodeSettings) -> usize {

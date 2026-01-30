@@ -1,7 +1,37 @@
-mod pixelflut_gstreamer;
-mod partitioned_buffer;
+#![feature(addr_parse_ascii)]
+#![feature(ascii_char)]
+#![feature(nonpoison_rwlock)]
+#![feature(sync_nonpoison)]
+#![feature(nonpoison_mutex)]
 
-use pixelflut_gstreamer::plugin_init;
+use gstreamer::{
+    glib::{self, types::StaticType},
+    Rank,
+};
+
+use crate::{pxmultitcpsink::PXMultiTCPSink, rsimage2pixelflut::PixelflutConvert};
+
+pub(crate) mod connectionpool;
+pub(crate) mod partitioned_buffer_meta;
+mod pxmultitcpsink;
+mod rsimage2pixelflut;
+pub(crate) mod simplethreadpool;
+
+fn plugin_init(plugin: &gstreamer::Plugin) -> Result<(), glib::BoolError> {
+    gstreamer::Element::register(
+        Some(plugin),
+        "rsimage2pixelflut",
+        Rank::NONE,
+        PixelflutConvert::static_type(),
+    )?;
+    gstreamer::Element::register(
+        Some(plugin),
+        "pxmultitcpsink",
+        Rank::NONE,
+        PXMultiTCPSink::static_type(),
+    )?;
+    Ok(())
+}
 
 gstreamer::plugin_define!(
     pixelflut,

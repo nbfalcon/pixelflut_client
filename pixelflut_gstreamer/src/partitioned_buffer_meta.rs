@@ -57,20 +57,17 @@ pub(crate) mod imp {
     use core::ptr;
     use std::mem;
 
-    use gstreamer::{
-        ffi::GstMeta,
-        glib::{
-            self,
-            translate::{FromGlib, IntoGlib},
-        },
+    use gstreamer::glib::{
+        self,
+        translate::{FromGlib, IntoGlib},
     };
 
-    use crate::partitioned_buffer::{attach_to_buffer, BufferPartitionMetadataParams};
+    use crate::partitioned_buffer_meta::{attach_to_buffer, BufferPartitionMetadataParams};
 
     #[repr(C)]
     pub struct GstBufferPartitionMetadata {
         parent: gstreamer::ffi::GstMeta,
-        meta: BufferPartitionMetadataParams,
+        pub meta: BufferPartitionMetadataParams,
     }
 
     // Function to register the meta API and get a type back.

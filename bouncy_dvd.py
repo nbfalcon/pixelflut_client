@@ -52,29 +52,28 @@ def mk_gstreamer():
     CV_WIDTH = 1920
     CV_HEIGHT = 1080
 
-    FILE = "Subway Surfers (2024) - Gameplay [4K 16x9] No Copyright [i0M4ARe9v0Y].webm"
-    HOST = "10.55.1.200"
-    PORT = 1234
+    FILE = 'Tresorknacker in Berlin [14230136].mp4'
+    HOST = '2001:67c:20a1:1561:e61d:2dff:fe4c:f6e1'
+    PORT = 1337
+    # FILE = "Subway Surfers (2024) - Gameplay [4K 16x9] No Copyright [i0M4ARe9v0Y].webm"
+    # HOST = "10.55.1.200"
+    # PORT = 1234
 
     pipeline = Gst.parse_launch(
-        f"filesrc name=input ! queue ! decodebin ! videoconvert ! videoscale ! capsfilter name=caps ! queue ! rsimage2pixelflut name=pixelflut ! queue ! tcpclientsink name=tcp"
+        f"uridecodebin uri=https://cdn.c3voc.de/hls/s1/native_hd.m3u8 ! videoconvert ! videoscale ! capsfilter name=caps ! queue ! rsimage2pixelflut name=pixelflut ! queue ! tcpclientsink name=tcp"
     )
     setup_bus(pipeline)
-    filesrc = pipeline.get_by_name("input")
-    caps = pipeline.get_by_name("caps")
+    caps = pipeline.get_by_name('caps')
+    # filesrc = pipeline.get_by_name("input")
     pixelflut = pipeline.get_by_name("pixelflut")
     tcp = pipeline.get_by_name("tcp")
-    filesrc.set_property(
-        "location",
-        FILE,
-    )
+    tcp.set_property("host", HOST)
+    tcp.set_property("port", PORT)
     as_caps = Gst.Caps.from_string(
         f"video/x-raw,format=(string)RGBA,width=(int){WIDTH},height=(int){HEIGHT}"
     )
     assert as_caps
     caps.set_property('caps', as_caps)
-    tcp.set_property("host", HOST)
-    tcp.set_property("port", PORT)
 
     dvd = DVDLogo(WIDTH, HEIGHT, CV_WIDTH, CV_HEIGHT)
 
