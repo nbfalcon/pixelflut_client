@@ -139,7 +139,7 @@ fn connect_tuple(all_connections: &mut Vec<TcpStream>, tuple: &ConnectionTuple) 
         addrs.retain(|e| e.is_ipv4() == addrkind.is_ipv4());
     }
 
-    let addr_is_dead = BitSet::with_capacity(addrs.len());
+    let mut addr_is_dead = BitSet::with_capacity(addrs.len());
     let mut addr_next_base = 0;
     for _ in 0..tuple.multiplicity {
         let mut found_stream: Option<TcpStream> = None;
@@ -150,9 +150,11 @@ fn connect_tuple(all_connections: &mut Vec<TcpStream>, tuple: &ConnectionTuple) 
             }
 
             if let Ok(conn) = connect_1(addrs[addr_i2], &tuple.via) {
-                addr_next_base += 1;
+                addr_next_base = addr_i + 1;
                 found_stream = Some(conn);
                 break;
+            } else {
+                addr_is_dead.insert(addr_i2);
             };
         }
 
